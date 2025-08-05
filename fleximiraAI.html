@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlexiMira Chatbox</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts - Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            max-width: 600px;
+            height: 80vh; /* Adjust height as needed */
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        .chat-history {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+            display: flex;
+            flex-direction: column;
+        }
+        .message-bubble {
+            max-width: 80%;
+            padding: 10px 15px;
+            border-radius: 20px;
+            margin-bottom: 10px;
+            word-wrap: break-word;
+            line-height: 1.4;
+        }
+        .user-bubble {
+            background-color: #e0f2fe; /* Light blue */
+            align-self: flex-end;
+            color: #1e40af; /* Darker blue text */
+            border-bottom-right-radius: 4px; /* Sharper corner for user */
+        }
+        .ai-bubble {
+            background-color: #f0fdf4; /* Light green */
+            align-self: flex-start;
+            color: #166534; /* Darker green text */
+            border-bottom-left-radius: 4px; /* Sharper corner for AI */
+        }
+        .loading-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+            color: #6b7280;
+        }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #3b82f6; /* Blue */
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .input-area {
+            display: flex;
+            padding: 15px;
+            border-top: 1px solid #e5e7eb;
+            background-color: #f9fafb;
+        }
+        .input-area input {
+            flex-grow: 1;
+            padding: 12px 16px;
+            border: 1px solid #d1d5db;
+            border-radius: 24px;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .input-area input:focus {
+            border-color: #3b82f6;
+        }
+        .input-area button {
+            background-color: #3b82f6; /* Blue */
+            color: white;
+            padding: 12px 20px;
+            border-radius: 24px;
+            font-weight: 600;
+            margin-left: 10px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .input-area button:hover:not(:disabled) {
+            background-color: #2563eb; /* Darker blue on hover */
+        }
+        .input-area button:disabled {
+            background-color: #9ca3af; /* Gray */
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="chat-container">
+        <div class="chat-history" id="chatHistory">
+            <!-- Chat messages will be appended here -->
+            <div class="message-bubble ai-bubble">Hello! I'm your FlexiMira assistant. How can I help you today?</div>
+        </div>
+
+        <div id="loadingIndicator" class="loading-indicator hidden">
+            <div class="spinner"></div>
+            <span>FlexiMira is typing...</span>
+        </div>
+
+        <div class="input-area">
+            <input type="text" id="userInput" placeholder="Type your message..." class="focus:ring-2 focus:ring-blue-500">
+            <button id="sendButton">Send</button>
+        </div>
+    </div>
+
+    <script>
+        const chatHistoryDiv = document.getElementById('chatHistory');
+        const userInput = document.getElementById('userInput');
+        const sendButton = document.getElementById('sendButton');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+
+        // IMPORTANT: Replace with your actual Gemini API Key.
+        // For production, you should proxy this through a secure backend server
+        // to prevent exposing your API key directly in client-side code.
+        const API_KEY = "AIzaSyAIShR_1zKRSnPM-yLErHhEnsWM-0Dy6Tg"; // Your API Key will be provided by Canvas runtime.
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${API_KEY}`;
+
+        let chatHistory = []; // Stores the conversation for multi-turn chat
+
+        // Add initial system instruction to chat history for the model
+        chatHistory.push({
+            role: "model",
+            parts: [{ text: "You are a helpful AI assistant." }]
+        });
+
+        function appendMessage(sender, message, type) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message-bubble', type === 'user' ? 'user-bubble' : 'ai-bubble');
+            messageElement.textContent = message;
+            chatHistoryDiv.appendChild(messageElement);
+            chatHistoryDiv.scrollTop = chatHistoryDiv.scrollHeight; // Scroll to bottom
+        }
+
+        async function sendMessage() {
+            const userText = userInput.value.trim();
+            if (userText === '') return;
+
+            appendMessage('You', userText, 'user');
+            userInput.value = ''; // Clear input field
+            sendButton.disabled = true;
+            userInput.disabled = true;
+            loadingIndicator.classList.remove('hidden');
+
+            // Add user message to chat history for the API call
+            chatHistory.push({ role: "user", parts: [{ text: userText }] });
+
+            const payload = {
+                contents: chatHistory
+            };
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`API Error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+                }
+
+                const result = await response.json();
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const aiResponse = result.candidates[0].content.parts[0].text;
+                    appendMessage('AI', aiResponse, 'ai');
+                    // Add AI response to chat history for multi-turn
+                    chatHistory.push({ role: "model", parts: [{ text: aiResponse }] });
+                } else {
+                    appendMessage('AI', "Sorry, I couldn't get a response. Please try again.", 'ai');
+                }
+
+            } catch (error) {
+                console.error('Error calling Gemini API:', error);
+                appendMessage('AI', `An error occurred: ${error.message}. Please check your API key and try again.`, 'ai');
+                // On error, revert chat history to before the failed turn to avoid confusing the model
+                chatHistory.pop(); // Remove the last user message
+            } finally {
+                sendButton.disabled = false;
+                userInput.disabled = false;
+                loadingIndicator.classList.add('hidden');
+                userInput.focus();
+            }
+        }
+
+        // Event Listeners
+        sendButton.addEventListener('click', sendMessage);
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Initial focus
+        userInput.focus();
+    </script>
+</body>
+</html>
